@@ -20,6 +20,7 @@ export default function KitchenQueue({ status, title, empty, history, toolbar })
   const [updatingOrderId, setUpdatingOrderId] = useState(null)
   const [expandedOrders, setExpandedOrders] = useState({})
   const [visibleItemCounts, setVisibleItemCounts] = useState({})
+  const [actionMessage, setActionMessage] = useState('')
   const ticketRefs = useRef(new Map())
   const ticketGridRef = useRef(null)
 
@@ -74,10 +75,21 @@ export default function KitchenQueue({ status, title, empty, history, toolbar })
 
   async function move(order, next) {
     if (updatingOrderId) return
+
     setActionError('')
+    setActionMessage('')
     setUpdatingOrderId(order.id)
+
     try {
-      await api(`/orders/${order.id}/status`, { method: 'PATCH', body: { status: next } })
+      await api(`/orders/${order.id}/status`, {
+        method: 'PATCH',
+        body: { status: next },
+      })
+      setActionMessage(
+        next === 'preparing'
+          ? 'Order moved to Preparing.'
+          : 'Order marked Ready.',
+      )
       reload()
     } catch (e) {
       setActionError(e.message)
@@ -94,6 +106,7 @@ export default function KitchenQueue({ status, title, empty, history, toolbar })
       <PageHeader title={title} />
       {toolbar}
       <ErrorBox message={error || actionError} />
+      {actionMessage && <p className="muted" role="status">{actionMessage}</p>}
       {loading && !data ? <Loading /> : data?.length === 0 ? <Empty>{empty}</Empty> : history ? (
         <div className="table-wrap kitchen-history-wrap">
           <table className="kitchen-history-table">
