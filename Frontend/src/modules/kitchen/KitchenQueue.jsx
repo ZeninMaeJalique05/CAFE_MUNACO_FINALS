@@ -117,7 +117,12 @@ export default function KitchenQueue({ status, title, empty, history, toolbar })
               <col className="kitchen-history-col-served" />
             </colgroup>
             <thead>
-              <tr><th>Order</th><th>Customer</th><th>Order Type</th><th>Served</th></tr>
+              <tr>
+                <th>Order</th>
+                <th>Customer</th>
+                <th>Items</th>
+                <th>Served</th>
+              </tr>
             </thead>
             <tbody>
               {data.map((o) => (
@@ -134,12 +139,24 @@ export default function KitchenQueue({ status, title, empty, history, toolbar })
                     }
                   }}
                 >
-                  <td><strong>{o.order_no}</strong></td>
+                  <td>
+                    <strong>{o.order_no}</strong>
+                    <div className="muted">Prepared by {o.prepared_by_name || '—'}</div>
+                  </td>
                   <td>{o.customer_name}</td>
                   <td>
-                    {o.order_type === 'reservation'
-                      ? <span className="reservation-highlight">{ORDER_TYPES[o.order_type]}</span>
-                      : (ORDER_TYPES[o.order_type] || o.order_type)}
+                    {o.items?.length ? (
+                      <ul>
+                        {o.items.map((item) => (
+                          <li key={item.id}>
+                            {qty(item.quantity)}× {item.item_name}
+                            {item.notes && <span className="muted"> — {item.notes}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <span className="muted">No item details</span>
+                    )}
                   </td>
                   <td className="muted">{dateTime(o[since])}</td>
                 </tr>
