@@ -1,0 +1,241 @@
+import { useLayoutEffect, useRef, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { api } from '../../services/api.js'
+import { useFetch } from '../../hooks.js'
+import { Empty, ErrorBox, Loading, PageHeader } from '../../components/ui.jsx'
+import Icon from '../../components/Icon.jsx'
+import { ORDER_TYPES, dateTime, timeAgo, qty } from '../../utils.js'
+
+// One screen for Incoming / Preparing / Ready / History. Only `status` changes.
+// [WBS 2.1.1] Display incoming, preparing, and ready orders.
+// [WBS 2.1.2] Implement order preparation status updates.
+// [WBS 2.1.3] Display kitchen order history.
+export default function KitchenQueue({ status, title, empty, history, toolbar }) {
+  const navigate = useNavigate()
+  const { data, error, loading, reload } = useFetch(
+    `/orders?status=${status}&items=1&sort=${history ? 'newest' : 'oldest'}`,
+    { poll: 10000 },
+  )
+  const [actionError, setActionError] = useState('')
+  const [updatingOrderId, setUpdatingOrderId] = useState(null)
+  const [expandedOrders, setExpandedOrders] = useState({})
+  const [visibleItemCounts, setVisibleItemCounts] = useState({})
+  const ticketRefs = useRef(new Map())
+  const ticketGridRef = useRef(null)
+
+  useLayoutEffect(() => {
+    if (history || !data?.length) return undefined
+
+    const fitItemsToCards = () => {
+      const fittedCounts = {}
+      data.forEach((order) => {
+        if (expandedOrders[order.id] || order.items.length < 5) return
+        if (window.matchMedia('(max-width: 900px)').matches) {
+          fittedCounts[order.id] = 4
+          return
+        }
+        const card = ticketRefs.current.get(order.id)
+        if (card?.classList.contains('reservation-ticket')) {
+          fittedCounts[order.id] = 4
+          return
+        }
+        const list = card?.querySelector('.ticket-items:not(.ticket-items-measure)')
+        const measureList = card?.querySelector('.ticket-items-measure')
+        const more = card?.querySelector('.ticket-more')
+        const anchor = card?.querySelector('.request, .ticket-action, .ticket-waiting')
+        if (!card || !list || !measureList || !more || !anchor) return
+
+        measureList.style.width = `${list.clientWidth}px`
+        const listTop = list.getBoundingClientRect().top
+        const availableHeight = anchor.getBoundingClientRect().top - listTop - more.getBoundingClientRect().height - 10
+        let usedHeight = 0
+        let count = 0
+        for (const item of measureList.children) {
+          const itemHeight = item.getBoundingClientRect().height
+          if (usedHeight + itemHeight > availableHeight) break
+          usedHeight += itemHeight
+          count += 1
+        }
+        fittedCounts[order.id] = Math.max(1, Math.min(order.items.length, count))
+      })
+
+      setVisibleItemCounts((current) => {
+        const changed = Object.entries(fittedCounts).some(([id, count]) => current[id] !== count)
+        return changed ? { ...current, ...fittedCounts } : current
+      })
+    }
+
+    fitItemsToCards()
+    const observer = new ResizeObserver(fitItemsToCards)
+    if (ticketGridRef.current) observer.observe(ticketGridRef.current)
+    ticketRefs.current.forEach((card) => observer.observe(card))
+    return () => observer.disconnect()
+  }, [data, expandedOrders, history])
+
+  async function move(order, next) {
+    if (updatingOrderId) return
+    setActionError('')
+    setUpdatingOrderId(order.id)
+    try {
+      await api(`/orders/${order.id}/status`, { method: 'PATCH', body: { status: next } })
+      reload()
+    } catch (e) {
+      setActionError(e.message)
+      reload()
+    } finally {
+      setUpdatingOrderId(null)
+    }
+  }
+
+  const since = { sent: 'sent_at', preparing: 'preparing_at', ready: 'ready_at', served: 'served_at' }[status]
+
+  return (
+    <>
+      <PageHeader title={title} />
+      {toolbar}
+      <ErrorBox message={error || actionError} />
+      {loading && !data ? <Loading /> : data?.length === 0 ? <Empty>{empty}</Empty> : history ? (
+        <div className="table-wrap kitchen-history-wrap">
+          <table className="kitchen-history-table">
+            <colgroup>
+              <col className="kitchen-history-col-order" />
+              <col className="kitchen-history-col-customer" />
+              <col className="kitchen-history-col-type" />
+              <col className="kitchen-history-col-served" />
+            </colgroup>
+            <thead>
+              <tr><th>Order</th><th>Customer</th><th>Order Type</th><th>Served</th></tr>
+            </thead>
+            <tbody>
+              {data.map((o) => (
+                <tr
+                  key={o.id}
+                  className={`order-row${o.order_type === 'reservation' ? ' reservation-row' : ''}`}
+                  tabIndex={0}
+                  aria-label={`Open order ${o.order_no}`}
+                  onClick={() => navigate(`/orders/${o.id}`, { state: { from: '/kitchen/history' } })}
+                  onKeyDown={(e) => {
+                    if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                      e.preventDefault()
+                      navigate(`/orders/${o.id}`, { state: { from: '/kitchen/history' } })
+                    }
+                  }}
+                >
+                  <td><strong>{o.order_no}</strong></td>
+                  <td>{o.customer_name}</td>
+                  <td>
+                    {o.order_type === 'reservation'
+                      ? <span className="reservation-highlight">{ORDER_TYPES[o.order_type]}</span>
+                      : (ORDER_TYPES[o.order_type] || o.order_type)}
+                  </td>
+                  <td className="muted">{dateTime(o[since])}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="tickets" ref={ticketGridRef}>
+          {data?.map((o) => (
+            <article
+              className={`ticket ticket-clickable ${o.special_requests ? 'has-request' : ''} ${o.order_type === 'reservation' ? 'reservation-ticket' : ''} ${expandedOrders[o.id] ? 'ticket-expanded' : ''}`}
+              key={o.id}
+              ref={(element) => {
+                if (element) ticketRefs.current.set(o.id, element)
+                else ticketRefs.current.delete(o.id)
+              }}
+              role="link"
+              tabIndex={0}
+              aria-label={`Open order ${o.order_no}`}
+              onClick={(e) => {
+                if (!e.target.closest('button, a')) navigate(`/orders/${o.id}`)
+              }}
+              onKeyDown={(e) => {
+                if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                  e.preventDefault()
+                  navigate(`/orders/${o.id}`)
+                }
+              }}
+            >
+              <header>
+                <div>
+                  <Link to={`/orders/${o.id}`}><strong>{o.order_no}</strong></Link>
+                  <div className="muted">{o.customer_name}</div>
+                </div>
+                <div className="ticket-meta">
+                  <span>{o.table_no || ORDER_TYPES[o.order_type]}</span>
+                  <span className="muted">{history ? dateTime(o[since]) : timeAgo(o[since])}</span>
+                </div>
+              </header>
+
+              {o.scheduled_at && (
+                o.order_type === 'reservation' ? (
+                  <div className="reservation-schedule" aria-label={`Reservation for ${dateTime(o.scheduled_at)}, ${qty(o.guests)} guests`}>
+                    <span className="reservation-calendar"><Icon name="calendar" size={16} /></span>
+                    <div className="reservation-copy">
+                      <strong>RESERVATION</strong>
+                      <span>{dateTime(o.scheduled_at)}</span>
+                    </div>
+                    {o.guests && <span className="reservation-guests">{qty(o.guests)} guests</span>}
+                  </div>
+                ) : (
+                  <p className="muted">
+                    {ORDER_TYPES[o.order_type]} for {dateTime(o.scheduled_at)}
+                    {o.guests ? ` · ${qty(o.guests)} guests` : ''}
+                  </p>
+                )
+              )}
+
+              <ul className="ticket-items">
+                {o.items.slice(0, expandedOrders[o.id] ? o.items.length : (visibleItemCounts[o.id] ?? 4)).map((i) => (
+                  <li key={i.id}>
+                    <span className="ticket-qty">{qty(i.quantity)}×</span>
+                    <span>{i.item_name}{i.notes && <div className="note">{i.notes}</div>}</span>
+                  </li>
+                ))}
+              </ul>
+              {o.items.length >= 5 && (expandedOrders[o.id] || (visibleItemCounts[o.id] ?? 4) < o.items.length) && (
+                <button
+                  type="button"
+                  className="link ticket-more"
+                  aria-expanded={!!expandedOrders[o.id]}
+                  onClick={() => setExpandedOrders((current) => ({ ...current, [o.id]: !current[o.id] }))}
+                >
+                  {expandedOrders[o.id] ? 'See less' : `See more (${o.items.length - (visibleItemCounts[o.id] ?? 4)})`}
+                </button>
+              )}
+
+              <ul className="ticket-items ticket-items-measure" aria-hidden="true">
+                {o.items.map((i) => (
+                  <li key={i.id}>
+                    <span className="ticket-qty">{qty(i.quantity)}</span>
+                    <span>{i.item_name}{i.notes && <div className="note">{i.notes}</div>}</span>
+                  </li>
+                ))}
+              </ul>
+
+              {o.special_requests && (
+                <div className="request">
+                  <strong>Special request</strong>
+                  <p>{o.special_requests}</p>
+                </div>
+              )}
+
+              {status === 'sent' && (
+                <button className="btn btn-primary wide ticket-action" disabled={updatingOrderId !== null} onClick={() => move(o, 'preparing')}>
+                  {updatingOrderId === o.id ? 'Updating...' : 'Start preparing'}
+                </button>
+              )}
+              {status === 'preparing' && (
+                <button className="btn btn-primary wide ticket-action" disabled={updatingOrderId !== null} onClick={() => move(o, 'ready')}>
+                  {updatingOrderId === o.id ? 'Updating...' : 'Mark as ready'}
+                </button>
+              )}
+              {status === 'ready' && <p className="muted ticket-waiting">Waiting for service staff to pick it up.</p>}
+            </article>
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
