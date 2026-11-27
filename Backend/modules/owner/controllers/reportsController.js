@@ -1,3 +1,4 @@
+
 import { Router } from 'express';
 import { getRouteHandlerChain } from '../../../controllers/routeHandlers.js';
 import { pool } from '../../../config/db.js';
@@ -7,7 +8,8 @@ import { wrap } from '../../../utils/http.js';
 const router = Router();
 router.use(requireRole('owner'));
 
-const rows = async (sql, params = []) => (await pool.query(sql, params))[0];
+const rows = async (sql, params = []) =>
+  (await pool.query(sql, params))[0];
 
 // [WBS 4.2.1] Calculate sales summaries and trend data.
 // [WBS 4.2.2] Include best-selling items and sales by category.
@@ -36,7 +38,12 @@ router.get(
 
     res.json({
       days,
-      totals: { ...totals, items_sold: itemsSold.items_sold },
+
+      totals: {
+        ...totals,
+        items_sold: itemsSold.items_sold,
+      },
+
       overview: (await rows(
         `SELECT
            COALESCE(
@@ -47,6 +54,7 @@ router.get(
          FROM orders
          WHERE status = 'served'`,
       ))[0],
+
       daily: await rows(
         `SELECT
            DATE_FORMAT(served_at, '%Y-%m-%d') AS day,
@@ -59,6 +67,8 @@ router.get(
          ORDER BY day`,
         [days],
       ),
+
+      // [WBS 4.2.2] Get best-selling items.
       top_items: await rows(
         `SELECT
            oi.item_name,
@@ -73,6 +83,8 @@ router.get(
          LIMIT 8`,
         [days],
       ),
+
+      // [WBS 4.2.2] Get sales grouped by category.
       by_category: await rows(
         `SELECT
            COALESCE(mi.category, 'Uncategorized') AS category,
@@ -87,6 +99,7 @@ router.get(
          ORDER BY sales DESC`,
         [days],
       ),
+
       monthly: await rows(
         `SELECT
            DATE_FORMAT(served_at, '%Y-%m') AS period,
@@ -98,6 +111,7 @@ router.get(
          GROUP BY period
          ORDER BY period`,
       ),
+
       yearly: await rows(
         `SELECT
            DATE_FORMAT(served_at, '%Y') AS period,
