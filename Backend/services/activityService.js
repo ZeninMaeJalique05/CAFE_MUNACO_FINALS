@@ -12,3 +12,13 @@ export async function logActivity(userId, action, details, conn = pool) {
     String(details).slice(0, 255),
   ]);
 }
+
+import { pool } from '../config/db.js'
+
+// Shared activity writer used by order, inventory, and staff-account changes.
+export async function logActivity(userId, action, details, conn = pool) {
+  await conn.query(
+    'INSERT INTO activity_log (user_id, action, details) VALUES (?, ?, ?)',
+    [userId, action, String(details).slice(0, 255)],
+  )
+}
