@@ -220,3 +220,58 @@ function DailyLineChart({ rows, days }) {
   )
 }
 
+// [WBS 4.2.2] Identify best-selling items and sales by category.
+export default function Reports() {
+  const [days, setDays] = useState('7')
+  const { data: r, error, loading } = useFetch(`/reports/summary?days=${days}`)
+  const dailyRows = dailySeries(r?.daily || [], Number(days))
+
+  return (
+    <div className="reports-page">
+      <PageHeader title="Sales analytics" subtitle="Sales trends from orders marked as served." className="report-page-head">
+        <select value={days} onChange={(e) => setDays(e.target.value)} aria-label="Daily sales period">
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
+        <button type="button" className="icon-button" aria-label="Print report" title="Print report" onClick={() => window.print()}>
+          <Icon name="printer" size={18} />
+        </button>
+      </PageHeader>
+
+      <ErrorBox message={error} />
+      {loading && !r ? <Loading /> : r && (
+        <>
+          <div className="reports-summary-layout">
+            <section className="panel report-total-revenue">
+              <div className="report-total-revenue-heading">
+                <h2>Total revenue</h2>
+                <span className="report-total-revenue-icon"><Icon name="chart" size={21} /></span>
+              </div>
+              <strong className="report-total-revenue-value">{peso(r.overview.total_revenue)}</strong>
+              <span className="report-total-revenue-caption">Lifetime sales from served orders</span>
+            </section>
+            <div className="stats reports-summary-stats">
+              <StatCard label="Sales today" value={peso(r.overview.sales_today)} />
+              <StatCard label={`Sales (last ${days} days)`} value={peso(r.totals.sales)} />
+              <StatCard label="Orders served" value={qty(r.totals.orders)} />
+              <StatCard label="Products sold" value={qty(r.totals.items_sold)} />
+            </div>
+          </div>
+
+          <DailyLineChart rows={dailyRows} days={days} />
+
+          <div className="grid-2 reports-sales-grid">
+            <SalesChart title="Monthly sales" subtitle="Last 12 months" rows={r.monthly} periodLabel={monthLabel} />
+            <SalesChart title="Yearly sales" subtitle="Last 5 years" rows={r.yearly} periodLabel={(year) => year} />
+          </div>
+
+          <div className="grid-2 reports-detail-grid">
+            <CategoryChart rows={r.by_category} days={days} />
+            <BestSellingChart rows={r.top_items} days={days} />
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
