@@ -1,6 +1,13 @@
 import { useState } from 'react'
 import './KitchenApp.css'
 
+function Only({ roles, children }) {
+  const { user } = useAuth()
+  return roles.includes(user.role)
+    ? children
+    : <Navigate to="/dashboard" replace />
+}
+
 function App() {
   const [activeStatus, setActiveStatus] = useState('sent')
   const selectedStatus = statuses.find((status) => status.id === activeStatus)
