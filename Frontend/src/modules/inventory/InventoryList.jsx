@@ -6,13 +6,12 @@ import { Empty, ErrorBox, Loading, PageHeader, StatCard, StockBadge } from '../.
 import { INVENTORY_CATEGORIES, dateTime, qty } from '../../utils.js'
 import Icon from '../../components/Icon.jsx'
 import ActionMenu from '../../components/ActionMenu.jsx'
+import ItemForm from './ItemForm.jsx'
 
-
-// =====================================================
-// WBS 3.1.1 - IMPLEMENT INVENTORY ITEM MANAGEMENT
-// View, Add, Update, and Delete Inventory Items
-// =====================================================
-
+// "Inventory List" for inventory staff, "Inventory Overview" (readOnly) for the owner
+// [WBS 3.1.1] Implement inventory item create, update, and delete.
+// [WBS 3.3.1] Display low-stock items and inventory dashboard.
+// [WBS 4.3.2] Owner inventory overview reuses this list in read-only mode.
 export default function InventoryList({ readOnly, embedded = false }) {
   const [params] = useSearchParams()
   const [q, setQ] = useState('')
@@ -23,7 +22,6 @@ export default function InventoryList({ readOnly, embedded = false }) {
   const [showAddItem, setShowAddItem] = useState(false)
   const [actionError, setActionError] = useState('')
   const [deletingId, setDeletingId] = useState(null)
-
   const { data, error, loading, reload } = useFetch(`/inventory${qs({
     q,
     category,
@@ -31,7 +29,8 @@ export default function InventoryList({ readOnly, embedded = false }) {
     low: readOnly ? (overviewFilter === 'low' ? '1' : '') : (low ? '1' : ''),
   })}`, { poll: 30000 })
 
-  // WBS 3.1.1 - Delete inventory item
+  const lowCount = data?.filter((i) => i.stock_status !== 'ok').length ?? 0
+
   async function removeItem(item) {
     if (!window.confirm(`Delete "${item.name}" from inventory?`)) return
     setActionError('')
@@ -46,22 +45,12 @@ export default function InventoryList({ readOnly, embedded = false }) {
     }
   }
 
-  // Display inventory table and available item actions
   function renderTable(items) {
     return (
       <div className="table-wrap inventory-table-wrap">
         <table className={`inventory-table${readOnly ? ' read-only' : ''}`}>
           <thead>
-            <tr>
-              <th>Item</th>
-              <th>Fresh</th>
-              <th>Category</th>
-              <th className="num">On hand</th>
-              <th className="num">Reorder at</th>
-              <th>Status</th>
-              <th>Updated</th>
-              {!readOnly && <th className="inventory-actions-heading">Actions</th>}
-            </tr>
+            <tr><th>Item</th><th>Fresh</th><th>Category</th><th className="num">On hand</th><th className="num">Reorder at</th><th>Status</th><th>Updated</th>{!readOnly && <th className="inventory-actions-heading">Actions</th>}</tr>
           </thead>
           <tbody>
             {items.map((i) => (
@@ -72,31 +61,16 @@ export default function InventoryList({ readOnly, embedded = false }) {
                     {Boolean(i.is_fresh) && <span className="tag inventory-fresh-mobile">Fresh</span>}
                   </div>
                 </td>
-                <td data-label="Fresh">
-                  {Boolean(i.is_fresh) ? <span className="tag">Fresh</span> : <span className="muted">—</span>}
-                </td>
-                <td data-label="Category">
-                  <span className="inventory-category">{i.category}</span>
-                </td>
+                <td data-label="Fresh">{Boolean(i.is_fresh) ? <span className="tag">Fresh</span> : <span className="muted">—</span>}</td>
+                <td data-label="Category"><span className="inventory-category">{i.category}</span></td>
                 <td className="num" data-label="On hand">
-                  <span className="inventory-quantity">
-                    <span className="inventory-quantity-value">{qty(i.quantity)}</span>
-                    <span className="inventory-quantity-unit">{i.unit}</span>
-                  </span>
+                  <span className="inventory-quantity"><span className="inventory-quantity-value">{qty(i.quantity)}</span><span className="inventory-quantity-unit">{i.unit}</span></span>
                 </td>
                 <td className="num" data-label="Reorder at">
-                  <span className="inventory-quantity">
-                    <span className="inventory-quantity-value">{qty(i.reorder_level)}</span>
-                    <span className="inventory-quantity-unit">{i.unit}</span>
-                  </span>
+                  <span className="inventory-quantity"><span className="inventory-quantity-value">{qty(i.reorder_level)}</span><span className="inventory-quantity-unit">{i.unit}</span></span>
                 </td>
-                <td data-label="Status">
-                  <StockBadge status={i.stock_status} />
-                </td>
-                <td className="inventory-updated" data-label="Updated">
-                  {dateTime(i.updated_at)}
-                </td>
-
+                <td data-label="Status"><StockBadge status={i.stock_status} /></td>
+                <td className="inventory-updated" data-label="Updated">{dateTime(i.updated_at)}</td>
                 {!readOnly && (
                   <td className="inventory-actions-cell" data-label="Actions">
                     <div className="inventory-row-actions">
@@ -108,29 +82,24 @@ export default function InventoryList({ readOnly, embedded = false }) {
                         menuClassName="inventory-action-menu"
                         trigger={<Icon name="moreVertical" size={19} />}
                       >
-                        <Link className="inventory-action-option" to={`/stock-management?tab=in&item=${i.id}`}>
-                          <Icon name="download" size={16} /> Stock In
-                        </Link>
-
-                        <Link className="inventory-action-option" to={`/stock-management?tab=out&item=${i.id}`}>
-                          <Icon name="upload" size={16} /> Stock Out
-                        </Link>
-
-                        {/* WBS 3.1.1 - Update inventory item */}
-                        <Link className="inventory-action-option" to={`/inventory/${i.id}/edit`}>
-                          <Icon name="edit" size={16} /> Edit
-                        </Link>
-
-                        {/* WBS 3.1.1 - Delete inventory item */}
-                        <button
-                          type="button"
-                          className="inventory-action-option danger"
-                          disabled={deletingId === i.id}
-                          onClick={() => removeItem(i)}
-                        >
-                          <Icon name="trash" size={16} />
-                          {deletingId === i.id ? 'Deleting...' : 'Delete'}
-                        </button>
+                          <Link className="inventory-action-option" to={`/stock-management?tab=in&item=${i.id}`}>
+                            <Icon name="download" size={16} /> Stock In
+                          </Link>
+                          <Link className="inventory-action-option" to={`/stock-management?tab=out&item=${i.id}`}>
+                            <Icon name="upload" size={16} /> Stock Out
+                          </Link>
+                          <Link className="inventory-action-option" to={`/inventory/${i.id}/edit`}>
+                            <Icon name="edit" size={16} /> Edit
+                          </Link>
+                          <button
+                            type="button"
+                            className="inventory-action-option danger"
+                            disabled={deletingId === i.id}
+                            onClick={() => removeItem(i)}
+                          >
+                            <Icon name="trash" size={16} />
+                            {deletingId === i.id ? 'Deleting...' : 'Delete'}
+                          </button>
                       </ActionMenu>
                     </div>
                   </td>
@@ -150,16 +119,60 @@ export default function InventoryList({ readOnly, embedded = false }) {
           title={readOnly ? 'Inventory Overview' : 'Inventory Management'}
           subtitle={readOnly ? 'Current quantities and availability. View only.' : undefined}
         >
-          {/* WBS 3.1.1 - Add new inventory item */}
-          {!readOnly && (
-            <button className="btn btn-primary" onClick={() => setShowAddItem(true)}>
-              Add new item
-            </button>
-          )}
+          {!readOnly && <button className="btn btn-primary" onClick={() => setShowAddItem(true)}>Add new item</button>}
         </PageHeader>
       )}
 
+      <div className="stats">
+        <StatCard label="Total Item" value={data?.length ?? '–'} />
+        <StatCard label="Low or out of stock" value={lowCount} tone={lowCount ? 'warn' : ''} />
+        <StatCard label="Fresh products shown" value={data?.filter((i) => Number(i.is_fresh) === 1).length ?? '–'} />
+      </div>
 
-</>
+      <div className="filters">
+        <input className="search" placeholder="Search items" value={q} onChange={(e) => setQ(e.target.value)} />
+        <select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category">
+          <option value="">All categories</option>
+          {INVENTORY_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+        </select>
+        {readOnly ? (
+          <select value={overviewFilter} onChange={(e) => setOverviewFilter(e.target.value)} aria-label="Inventory filter">
+            <option value="">All items</option>
+            <option value="fresh">Fresh products only</option>
+            <option value="low">Low stock only</option>
+          </select>
+        ) : (
+          <details className="inventory-filter-dropdown">
+            <summary>
+              Filters
+              {(fresh || low) && <span className="inventory-filter-count">{Number(fresh) + Number(low)}</span>}
+            </summary>
+            <div className="inventory-filter-menu">
+              <label className="inventory-filter-option">
+                <input type="checkbox" checked={fresh} onChange={(e) => setFresh(e.target.checked)} />
+                Fresh products
+              </label>
+              <label className="inventory-filter-option">
+                <input type="checkbox" checked={low} onChange={(e) => setLow(e.target.checked)} />
+                Low stock
+              </label>
+            </div>
+          </details>
+        )}
+      </div>
+
+      <ErrorBox message={error || actionError} />
+      {loading && !data ? <Loading /> : data?.length === 0 ? <Empty>No items match these filters.</Empty> : renderTable(data ?? [])}
+      {showAddItem && (
+        <ItemForm
+          modal
+          onClose={() => setShowAddItem(false)}
+          onSaved={() => {
+            setShowAddItem(false)
+            reload()
+          }}
+        />
+      )}
+    </>
   )
 }
