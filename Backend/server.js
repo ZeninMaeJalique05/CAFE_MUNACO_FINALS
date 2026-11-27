@@ -1,1 +1,1 @@
-app.use('/api/menu', requireAuth, menuRoutes)
+import './app.js'
