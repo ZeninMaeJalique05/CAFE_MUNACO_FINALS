@@ -1,3 +1,8 @@
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useAuth } from '../auth.jsx'
+import { useFetch } from '../hooks.js'
+import { Empty, ErrorBox, Loading, PageHeader, StatCard, StatusBadge } from '../components/ui.jsx'
+import { ORDER_TYPES, STATUS_LABEL, dateTime, peso, qty, timeAgo } from '../utils.js'
 import KitchenDashboard from '../modules/kitchen/KitchenDashboard.jsx'
 import Reports from '../modules/owner/Reports.jsx'
 
@@ -25,13 +30,6 @@ export default function Dashboard() {
     else next.set('tab', tab)
     setSearchParams(next)
   }
-
-<ErrorBox message={error} />
-{loading && !data ? <Loading /> : data && (
-  user.role === 'kitchen'
-    ? <KitchenDashboard data={data} />
-    : <Body role={user.role} d={data} />
-)}
 
   return (
     <>
@@ -230,4 +228,3 @@ function Body({ role, d }) {
     </>
   )
 }
-
