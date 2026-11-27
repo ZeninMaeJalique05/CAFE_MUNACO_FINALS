@@ -1,7 +1,7 @@
 import { useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../../components/ui.jsx'
 import StockForm from './StockForm.jsx'
-
+import StockHistory from './StockHistory.jsx'
 
 const TABS = [
   { id: 'in', label: 'Stock In' },
@@ -49,7 +49,16 @@ export default function StockManagement() {
         <StockForm type="out" embedded />
       </section>
 
-    
+    {/* [WBS 3.2.2] Display stock movement history. */}
+      <section
+        id="stock-panel-history"
+        role="tabpanel"
+        aria-labelledby="stock-tab-history"
+        hidden={activeTab !== 'history'}
+      >
+        <StockHistory embedded />
+      </section>
+
     </>
   )
 }
