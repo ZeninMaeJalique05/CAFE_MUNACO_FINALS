@@ -4,10 +4,13 @@ import { pool } from '../../../config/db.js';
 import { requireRole } from '../../../middleware/auth.js';
 import { wrap, httpError, isBlank } from '../../../utils/http.js';
 import { logActivity } from '../../../services/activityService.js';
-
+import { makeStockedMenuItemsAvailable } from '../../../services/orderInventoryService.js';
 
 const router = Router();
 
+const CATEGORIES = ['Seafood', 'Meat', 'Vegetables', 'Dairy', 'Dry Goods', 'Beverages', 'Other'];
+// Owner read access serves the shared overview/history workflow in WBS 4.3.2.
+const READERS = ['inventory', 'owner', 'kitchen'];
 
 const num = (v, label) => {
   const n = Number(v);
@@ -44,8 +47,66 @@ router.get(
   })
 );
 
+// [WBS 3.3.1] Return items at or below their reorder level.
+router.get(
+  '/low',
+  requireRole(...READERS),
+  wrap(async (req, res) => {
+    const [rows] = await pool.query(
+      'SELECT * FROM inventory_items WHERE quantity <= reorder_level ORDER BY (quantity / NULLIF(reorder_level, 0)) ASC, name'
+    );
+    res.json(rows.map((r) => ({ ...r, stock_status: status(r), shortage: Math.max(r.reorder_level - r.quantity, 0) })));
+  })
+);
 
+// [WBS 3.2.2] Display stock movement history.
+// ---------------------------------------------------------------- movement history (must be before /:id)
+// ?type=in|out  ?item_id=  ?q=item name  ?days=30
+router.get(
+  '/movements',
+  requireRole(...READERS),
+  wrap(async (req, res) => {
+    const where = [];
+    const params = [];
+    if (['in', 'out'].includes(req.query.type)) {
+      where.push('m.movement_type = ?');
+      params.push(req.query.type);
+    }
+    if (req.query.item_id) {
+      where.push('m.item_id = ?');
+      params.push(Number(req.query.item_id));
+    }
+    if (req.query.q) {
+      where.push('i.name LIKE ?');
+      params.push(`%${req.query.q}%`);
+    }
+    const days = Number(req.query.days);
+    if (days > 0) {
+      where.push('m.created_at >= NOW() - INTERVAL ? DAY');
+      params.push(Math.min(days, 365));
+    }
+    const [rows] = await pool.query(
+      `SELECT m.*, i.name AS item_name, i.unit, u.full_name AS user_name
+       FROM stock_movements m
+       JOIN inventory_items i ON i.id = m.item_id
+       JOIN users u ON u.id = m.created_by
+       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+       ORDER BY m.created_at DESC, m.id DESC LIMIT 500`,
+      params
+    );
+    res.json(rows);
+  })
+);
 
+router.get(
+  '/:id',
+  requireRole(...READERS),
+  wrap(async (req, res) => {
+    const [rows] = await pool.query('SELECT * FROM inventory_items WHERE id = ?', [req.params.id]);
+    if (!rows.length) throw httpError(404, 'Item not found.');
+    res.json({ ...rows[0], stock_status: status(rows[0]) });
+  })
+);
 
 // [WBS 3.1.1] Implement inventory item create, update, and delete.
 // ---------------------------------------------------------------- add item (inventory)
@@ -190,7 +251,57 @@ router.delete(
   })
 );
 
+// [WBS 3.2.1] Record stock-in and stock-out.
+// ---------------------------------------------------------------- stock in / stock out (inventory)
+async function moveStock(req, res, type) {
+  const b = req.body || {};
+  const quantity = num(b.quantity, 'Quantity');
+  if (quantity <= 0) throw httpError(400, 'Quantity must be more than zero.');
+  if (type === 'out' && isBlank(b.reason)) throw httpError(400, 'Choose a reason for removing this stock.');
 
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    // FOR UPDATE locks the row so two people cannot change the same item at once
+    const [rows] = await conn.query('SELECT * FROM inventory_items WHERE id = ? FOR UPDATE', [req.params.id]);
+    const item = rows[0];
+    if (!item) throw httpError(404, 'Item not found.');
+    if (type === 'out' && quantity > item.quantity) {
+      throw httpError(400, `Only ${item.quantity} ${item.unit} of ${item.name} left. You cannot remove ${quantity}.`);
+    }
+    const balance = num(Number(item.quantity) + (type === 'in' ? quantity : -quantity), 'Quantity');
+    await conn.query('UPDATE inventory_items SET quantity = ? WHERE id = ?', [balance, item.id]);
+    if (type === 'in') await makeStockedMenuItemsAvailable([item.id], conn);
+    await conn.query(
+      'INSERT INTO stock_movements (item_id, movement_type, quantity, balance_after, reason, supplier, note, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        item.id,
+        type,
+        quantity,
+        balance,
+        type === 'in' ? (isBlank(b.reason) ? 'Delivery' : String(b.reason).trim()) : String(b.reason).trim(),
+        type === 'in' && !isBlank(b.supplier) ? String(b.supplier).trim().slice(0, 100) : null,
+        isBlank(b.note) ? null : String(b.note).trim().slice(0, 255),
+        req.user.id,
+      ]
+    );
+    await logActivity(
+      req.user.id,
+      type === 'in' ? 'Stock in' : 'Stock out',
+      type === 'in'
+        ? `${item.name}: ${quantity} ${item.unit} received${b.supplier ? ' from ' + String(b.supplier).trim() : ''}`
+        : `${item.name}: ${quantity} ${item.unit} removed (${String(b.reason).trim()})`,
+      conn
+    );
+    await conn.commit();
+    res.json({ ok: true, item: { ...item, quantity: balance, stock_status: status({ ...item, quantity: balance }) } });
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
 
 router.post('/:id/stock-in', requireRole('inventory'), wrap((req, res) => moveStock(req, res, 'in')));
 router.post('/:id/stock-out', requireRole('inventory'), wrap((req, res) => moveStock(req, res, 'out')));

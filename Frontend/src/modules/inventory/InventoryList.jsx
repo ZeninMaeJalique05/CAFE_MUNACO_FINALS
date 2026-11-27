@@ -6,7 +6,7 @@ import { Empty, ErrorBox, Loading, PageHeader, StatCard, StockBadge } from '../.
 import { INVENTORY_CATEGORIES, dateTime, qty } from '../../utils.js'
 import Icon from '../../components/Icon.jsx'
 import ActionMenu from '../../components/ActionMenu.jsx'
-import ItemForm from './ItemForm.jsx'
+
 
 // =====================================================
 // WBS 3.1.1 - IMPLEMENT INVENTORY ITEM MANAGEMENT
@@ -159,7 +159,7 @@ export default function InventoryList({ readOnly, embedded = false }) {
         </PageHeader>
       )}
 
-      
+
 </>
   )
 }
