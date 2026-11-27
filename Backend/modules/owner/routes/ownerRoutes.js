@@ -17,6 +17,10 @@ users.post(
   '/:id/reset-password',
   ...ownerHandlers.getUsersHandlerChain('post', '/:id/reset-password'),
 );
+users.post(
+  '/:id/reset-password',
+  ...ownerHandlers.getUsersHandlerChain('post', '/:id/reset-password'),
+);
 
 const reports = Router();
 reports.use(requireRole('owner'));

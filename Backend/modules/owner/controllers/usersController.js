@@ -1,3 +1,4 @@
+
 import { Router } from 'express';
 import { getRouteHandlerChain } from '../../../controllers/routeHandlers.js';
 import { pool } from '../../../config/db.js';
@@ -5,6 +6,13 @@ import { hashPassword } from '../../../services/authService.js';
 import { requireRole } from '../../../middleware/auth.js';
 import { wrap, httpError, isBlank } from '../../../utils/http.js';
 import { logActivity } from '../../../services/activityService.js';
+
+function checkPassword(value) {
+  if (isBlank(value) || String(value).length < 6) {
+    throw httpError(400, 'The password needs at least 6 characters.');
+  }
+  return String(value);
+}
 
 const router = Router();
 router.use(requireRole('owner'));
@@ -14,7 +22,9 @@ const COLUMNS = 'id, full_name, username, role, is_active, created_at';
 
 function checkName(value) {
   const name = String(value || '').trim();
-  if (name.length < 2) throw httpError(400, 'Enter the employee’s full name.');
+  if (name.length < 2) {
+    throw httpError(400, 'Enter the employee’s full name.');
+  }
   return name;
 }
 
@@ -23,13 +33,7 @@ function checkRole(value) {
   return value;
 }
 
-function checkPassword(value) {
-  if (isBlank(value) || String(value).length < 6) {
-    throw httpError(400, 'The password needs at least 6 characters.');
-  }
-  return String(value);
-}
-
+// Get all user accounts
 router.get(
   '/',
   wrap(async (req, res) => {
@@ -40,6 +44,7 @@ router.get(
   }),
 );
 
+// Create a user account
 router.post(
   '/',
   wrap(async (req, res) => {
@@ -56,6 +61,7 @@ router.post(
     }
 
     const password = checkPassword(body.password);
+
     const [duplicate] = await pool.query(
       'SELECT id FROM users WHERE username = ?',
       [username],
@@ -81,6 +87,7 @@ router.post(
   }),
 );
 
+// Edit a user account
 router.put(
   '/:id',
   wrap(async (req, res) => {
@@ -113,6 +120,7 @@ router.put(
   }),
 );
 
+// Activate or deactivate an account
 router.patch(
   '/:id/active',
   wrap(async (req, res) => {
@@ -152,17 +160,20 @@ router.patch(
   }),
 );
 
-// Keep this endpoint if your project also includes WBS 4.4.2.
+// Reset a user's password (WBS 4.4.2)
 router.post(
   '/:id/reset-password',
   wrap(async (req, res) => {
     const password = checkPassword(req.body?.password);
+
     const [result] = await pool.query(
       'UPDATE users SET password_hash = ? WHERE id = ?',
       [hashPassword(password), req.params.id],
     );
 
-    if (!result.affectedRows) throw httpError(404, 'Account not found.');
+    if (!result.affectedRows) {
+      throw httpError(404, 'Account not found.');
+    }
 
     const [[user]] = await pool.query(
       'SELECT full_name FROM users WHERE id = ?',
